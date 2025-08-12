@@ -1,5 +1,6 @@
 # file: main.py
 
+import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,45 +12,59 @@ from api import auth, folders, notes, video
 
 # --- Инициализация ---
 
-# Создаем таблицы в базе данных на основе наших моделей.
+# 1. Создаем таблицы в базе данных на основе наших моделей.
 # Если таблицы уже существуют, эта команда ничего не сделает.
 models.Base.metadata.create_all(bind=engine)
 
-# Создаем основной объект приложения FastAPI
+# 2. Создаем основной объект приложения FastAPI
 app = FastAPI(
     title="AI Note Taker API",
     description="Бэкэнд для умного приложения по ведению заметок.",
     version="1.0.0",
 )
 
+# 3. Создание директорий для статических файлов при запуске.
+# Этот код выполняется каждый раз при старте приложения.
+# os.makedirs() безопасно создает папки и не выдает ошибку, если они уже существуют.
+os.makedirs("uploads", exist_ok=True)
+os.makedirs("generated_videos", exist_ok=True)
+
+
 # --- Настройка Middleware ---
 
 # Настраиваем CORS (Cross-Origin Resource Sharing).
-# origins = ["*"] позволяет принимать запросы с любого домена.
-# Для production лучше указать конкретный домен вашего фронтенда.
+# Это позволяет фронтенд-приложениям, запущенным на других адресах,
+# отправлять запросы к нашему API.
+origins = [
+    "http://localhost",
+    "http://localhost:3000", # Для React по умолчанию
+    "http://localhost:5173", # Для Vite (Vue, React) по умолчанию
+    "http://localhost:8080", # Для Vue по умолчанию
+    "*" # Разрешает все источники (можно использовать для простоты)
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"], # Разрешает все методы (GET, POST, и т.д.)
+    allow_headers=["*"], # Разрешает все заголовки
 )
+
 
 # --- Монтирование статических директорий ---
 
-# Это позволит FastAPI раздавать файлы, которые мы генерируем или загружаем.
-# Запрос на /uploads/filename.jpg будет искать файл в папке ./uploads/filename.jpg
+# Этот код делает содержимое папок `uploads` и `generated_videos`
+# доступным по URL. Например, файл ./uploads/image.jpg будет доступен
+# по адресу <ваш_домен>/uploads/image.jpg
+# Этот код теперь не будет вызывать ошибку, так как папки уже созданы.
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.mount("/generated_videos", StaticFiles(directory="generated_videos"), name="videos")
-# Можно добавить и папку для примеров голосов
-# app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 # --- Подключение роутеров ---
 
-# Подключаем все наши роутеры к основному приложению.
-# Теперь все эндпоинты из auth.py будут доступны по адресу /auth/...
-# все из notes.py - по адресу /notes/... и так далее.
+# Подключаем все наши эндпоинты из папки /api к основному приложению.
 app.include_router(auth.router)
 app.include_router(folders.router)
 app.include_router(notes.router)
@@ -61,6 +76,6 @@ app.include_router(video.router)
 @app.get("/", tags=["Root"])
 def read_root():
     """
-    Корневой эндпоинт для проверки работоспособности API.
+    Корневой эндпоинт для простой проверки, что API запущено и работает.
     """
     return {"status": "ok", "message": "Welcome to AI Note Taker API!"}
