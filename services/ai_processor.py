@@ -1,41 +1,17 @@
 # file: services/ai_processor.py
 
-# import google.generativeai as genai  <-- ЗАКОММЕНТИРОВАЛИ
-from google.cloud import vision, speech
 import requests
 from bs4 import BeautifulSoup
 from typing import List, Union
 
-# Импортируем наши настройки и схемы Pydantic
-from core.config import settings
+# Импортируем только схемы, так как нам не нужны реальные клиенты API
 from db.schemas import TextBlock, TranscriptBlock
 
-# --- Инициализация клиентов API ---
-
-# 1. Конфигурируем Gemini API - ЭТА ЧАСТЬ ТЕПЕРЬ НЕ НУЖНА
-# try:
-#     genai.configure(api_key=settings.GOOGLE_API_KEY)
-#     gemini_model = genai.GenerativeModel('gemini-1.5-flash')
-#     print("Google Gemini AI client initialized.")
-# except Exception as e:
-#     print(f"Error initializing Gemini AI client: {e}")
-#     gemini_model = None
-gemini_model = None # Просто указываем, что его нет
-print("Google Gemini AI client is DISABLED.")
+# --- Сообщения для логов, чтобы было понятно, что сервисы отключены ---
+print("AI PROCESSOR: All Google Cloud services are DISABLED (using stubs).")
 
 
-# 2. Инициализируем другие клиенты Google Cloud (Vision, Speech)
-try:
-    vision_client = vision.ImageAnnotatorClient()
-    speech_client = speech.SpeechClient()
-    print("Google Vision and Speech clients initialized.")
-except Exception as e:
-    print(f"Error initializing Google Cloud clients: {e}")
-    vision_client = None
-    speech_client = None
-
-
-# --- Основные функции сервиса ---
+# --- Функции-заглушки вместо реальных вызовов AI ---
 
 def summarize_and_structure_text(text: str, original_type: str) -> (str, List[TextBlock]):
     """
@@ -47,65 +23,48 @@ def summarize_and_structure_text(text: str, original_type: str) -> (str, List[Te
         return "Пустая заметка", [TextBlock(text="Содержимое отсутствует.")]
 
     # Создаем простой заголовок
-    title = f"Заметка из {original_type}: {text[:30]}..."
+    title = f"Заметка из '{original_type}': {text[:30]}..."
     # Возвращаем исходный текст как есть, в виде одного блока
-    structured_content = [TextBlock(text=text)]
+    structured_content = [TextBlock(header="Основной текст", text=text)]
 
     return title, structured_content
 
 
 def extract_text_from_photo(file_path: str) -> str:
-    """Распознает текст на изображении с помощью Google Vision AI (OCR)."""
-    if not vision_client:
-        raise ConnectionError("Vision Client not initialized.")
-    with open(file_path, "rb") as image_file:
-        content = image_file.read()
-    image = vision.Image(content=content)
-    response = vision_client.text_detection(image=image)
-    if response.error.message:
-        raise Exception(f"Vision API error: {response.error.message}")
-    return response.full_text_annotation.text if response.full_text_annotation else ""
+    """
+    ЗАГЛУШКА: Имитирует распознавание текста с фото.
+    Возвращает заранее заданный текст.
+    """
+    print(f"--- Using STUB for extract_text_from_photo (file: {file_path}) ---")
+    return "Это тестовый текст, распознанный с изображения. Функция OCR отключена."
 
 
 def transcribe_audio(file_path: str) -> (str, List[TranscriptBlock]):
-    """Транскрибирует аудиофайл, возвращая полный текст и структурированный транскрипт."""
-    if not speech_client:
-        raise ConnectionError("Speech Client not initialized.")
-
-    with open(file_path, "rb") as audio_file:
-        content = audio_file.read()
-
-    audio = speech.RecognitionAudio(content=content)
-    config = speech.RecognitionConfig(
-        encoding=speech.RecognitionConfig.AudioEncoding.MP3,
-        sample_rate_hertz=16000,
-        language_code="ru-RU",
-        enable_automatic_punctuation=True,
-        enable_word_time_offsets=True,
-    )
-
-    operation = speech_client.long_running_recognize(config=config, audio=audio)
-    print("Waiting for audio transcription to complete...")
-    response = operation.result(timeout=300)
-
-    full_text = []
-    transcript_blocks = []
-    for result in response.results:
-        alternative = result.alternatives[0]
-        full_text.append(alternative.transcript)
-        for word_info in alternative.words:
-            transcript_blocks.append(
-                TranscriptBlock(
-                    time_start=word_info.start_time.total_seconds(),
-                    text=word_info.word
-                )
-            )
-
-    return " ".join(full_text), transcript_blocks
+    """
+    ЗАГЛУШКА: Имитирует транскрибацию аудио.
+    Возвращает заранее заданный текст и структуру транскрипта.
+    """
+    print(f"--- Using STUB for transcribe_audio (file: {file_path}) ---")
+    
+    # Имитируем полный текст для суммаризации
+    full_text = "Это тестовая транскрибация аудиозаписи. Функция распознавания речи отключена."
+    
+    # Имитируем структуру транскрипта для отображения
+    transcript_blocks = [
+        TranscriptBlock(time_start=0.5, text="Это"),
+        TranscriptBlock(time_start=1.0, text="тестовая"),
+        TranscriptBlock(time_start=1.8, text="транскрибация"),
+        TranscriptBlock(time_start=2.5, text="аудиозаписи."),
+    ]
+    
+    return full_text, transcript_blocks
 
 
 def extract_text_from_link(url: str) -> str:
-    """Извлекает основной текстовый контент со страницы по URL."""
+    """
+    Эта функция остается рабочей, так как не зависит от Google Credentials.
+    Извлекает основной текстовый контент со страницы по URL.
+    """
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
