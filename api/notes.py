@@ -7,8 +7,12 @@ from typing import List, Optional
 
 from db import crud, schemas, models
 from db.database import get_db
-from .auth_dependency import get_current_user
-from services import ai_processor, storage, vector_store
+from api.auth_dependency import get_current_user
+
+# --- Правильные явные импорты экземпляров ---
+from services import ai_processor, content_processor
+from services.storage import file_storage
+from services.vector_store import vector_store
 
 router = APIRouter(prefix="/notes", tags=["Notes"])
 
@@ -21,20 +25,25 @@ def create_new_note(
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Создает новую заметку из разных источников (текст, ссылка, фото, аудио).
-    Реализация эндпоинта "NewNote" из ТЗ.
+    Создает новую заметку из разных источников (текст, ссылка, фото, аудио, YouTube, PDF, DOCX).
     """
     title = "Новая заметка"
     structured_content = []
     source_uri = None
     text_for_vector = ""
 
+    # --- Обработка файловых источников (если файл был передан) ---
+    file_path = None
+    if file:
+        file_path = file_storage.save_file(file)
+        source_uri = file_storage.get_file_url(file_path)
+
+    # --- Логика по типам ---
     if source_type == models.NoteType.TEXT:
         if not data:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Text data is required for type 'text'.")
         title, structured_content = ai_processor.summarize_and_structure_text(data, "text")
         text_for_vector = data
-
     elif source_type == models.NoteType.LINK:
         if not data:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "URL data is required for type 'link'.")
@@ -42,29 +51,48 @@ def create_new_note(
         extracted_text = ai_processor.extract_text_from_link(data)
         title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "link")
         text_for_vector = extracted_text
-
-    elif source_type in [models.NoteType.PHOTO, models.NoteType.AUDIO]:
-        if not file:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"File is required for type '{source_type.value}'.")
-        
-        file_path = storage.save_file(file)
-        source_uri = storage.get_file_url(file_path)
-
-        if source_type == models.NoteType.PHOTO:
-            extracted_text = ai_processor.extract_text_from_photo(file_path)
-            title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "photo")
-            text_for_vector = extracted_text
-        
-        elif source_type == models.NoteType.AUDIO:
-            full_transcript, transcript_blocks = ai_processor.transcribe_audio(file_path)
-            title, _ = ai_processor.summarize_and_structure_text(full_transcript, "audio")
-            structured_content = transcript_blocks # Для аудио сохраняем транскрипт
-            text_for_vector = full_transcript
-
+    elif source_type == models.NoteType.YOUTUBE:
+        if not data:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "YouTube URL is required for type 'youtube'.")
+        source_uri = data
+        extracted_text = content_processor.get_text_from_youtube(data)
+        if not extracted_text:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Could not get subtitles from YouTube video.")
+        title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "youtube")
+        text_for_vector = extracted_text
+    elif source_type == models.NoteType.PDF:
+        if not file_path:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "PDF file is required for type 'pdf'.")
+        extracted_text = content_processor.get_text_from_pdf(file_path)
+        if not extracted_text:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Could not extract text from PDF file.")
+        title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "pdf")
+        text_for_vector = extracted_text
+    elif source_type == models.NoteType.DOCX:
+        if not file_path:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "DOCX file is required for type 'docx'.")
+        extracted_text = content_processor.get_text_from_docx(file_path)
+        if not extracted_text:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Could not extract text from DOCX file.")
+        title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "docx")
+        text_for_vector = extracted_text
+    elif source_type == models.NoteType.PHOTO:
+        if not file_path:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Photo file is required for type 'photo'.")
+        extracted_text = ai_processor.extract_text_from_photo(file_path)
+        title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "photo")
+        text_for_vector = extracted_text
+    elif source_type == models.NoteType.AUDIO:
+        if not file_path:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Audio file is required for type 'audio'.")
+        full_transcript, transcript_blocks = ai_processor.transcribe_audio(file_path)
+        title, _ = ai_processor.summarize_and_structure_text(full_transcript, "audio")
+        structured_content = transcript_blocks
+        text_for_vector = full_transcript
     else:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid source type.")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or unsupported source type.")
 
-    # Создаем схему для новой заметки
+    # --- Сохранение результата ---
     note_to_create = schemas.NoteCreate(
         title=title,
         type=source_type,
@@ -72,17 +100,15 @@ def create_new_note(
         source_uri=source_uri
     )
     
-    # Сохраняем заметку в основной БД
     db_note = crud.create_note(db, note=note_to_create, user_id=current_user.id)
-
-    # Добавляем/обновляем вектор заметки для поиска
+    
     if text_for_vector:
         vector_store.upsert_note(
             note_id=db_note.id,
             user_id=current_user.id,
             text_content=text_for_vector
         )
-
+        
     return db_note
 
 
@@ -93,7 +119,6 @@ def get_all_user_notes(
 ):
     """
     Возвращает список всех заметок текущего пользователя.
-    Реализация эндпоинта "GetAll notes" из ТЗ.
     """
     return crud.get_all_notes_by_user(db=db, user_id=current_user.id)
 
@@ -106,21 +131,17 @@ def find_notes_by_semantic_search(
 ):
     """
     Выполняет семантический ("умный") поиск по всем заметкам пользователя.
-    Реализация эндпоинта "FindNote" из ТЗ.
     """
     if not q.strip():
         return []
 
-    # Ищем ID релевантных заметок в векторном хранилище
     note_ids = vector_store.search_notes(user_id=current_user.id, query_text=q)
 
     if not note_ids:
         return []
 
-    # Получаем полные объекты заметок из основной БД по найденным ID
     notes = db.query(models.Note).filter(models.Note.id.in_(note_ids)).all()
     
-    # Сортируем результат в том же порядке, в котором их вернул векторный поиск
     notes_map = {note.id: note for note in notes}
     sorted_notes = [notes_map[id] for id in note_ids if id in notes_map]
 

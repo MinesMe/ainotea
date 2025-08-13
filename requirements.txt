@@ -17,3 +17,8 @@ ffmpeg-python
 beautifulsoup4
 requests
 python-multipart
+youtube-transcript-api
+# Для чтения PDF-файлов
+PyMuPDF
+# Для чтения DOCX-файлов (на всякий случай, так как он был в content_processor)
+python-docx

@@ -15,6 +15,9 @@ class NoteType(str, enum.Enum):
     PHOTO = "photo"
     AUDIO = "audio"
     LINK = "link"
+    YOUTUBE = "youtube" 
+    PDF = "pdf"   
+    DOCX = "docx"
 
 
 class User(Base):

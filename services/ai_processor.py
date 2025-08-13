@@ -8,62 +8,85 @@ from typing import List, Union
 from db.schemas import TextBlock, TranscriptBlock
 
 # --- Сообщения для логов, чтобы было понятно, что сервисы отключены ---
-print("AI PROCESSOR: All Google Cloud services are DISABLED (using stubs).")
+print("AI PROCESSOR: LLM summarization is DISABLED (using stubs).")
+# ПРИМЕЧАНИЕ: Google Cloud Vision и Speech могут быть активны, если credentials предоставлены.
 
 
-# --- Функции-заглушки вместо реальных вызовов AI ---
+# --- Функции-заглушки и рабочие функции ---
 
 def summarize_and_structure_text(text: str, original_type: str) -> (str, List[TextBlock]):
     """
-    ЗАГЛУШКА: Вместо обращения к Gemini, просто возвращает заголовок
-    и исходный текст в виде одного блока.
+    ЗАГЛУШКА: Вместо обращения к LLM, просто возвращает заголовок
+    и исходный текст в виде одного блока. Эта функция больше не вызывает Gemini.
     """
-    print("--- Using STUB for summarize_and_structure_text ---")
+    print("--- Using STUB for summarize_and_structure_text (LLM is OFF) ---")
     if not text or len(text.strip()) < 1:
         return "Пустая заметка", [TextBlock(text="Содержимое отсутствует.")]
 
     # Создаем простой заголовок
     title = f"Заметка из '{original_type}': {text[:30]}..."
     # Возвращаем исходный текст как есть, в виде одного блока
-    structured_content = [TextBlock(header="Основной текст", text=text)]
+    structured_content = [TextBlock(header="Извлеченный текст", text=text)]
 
     return title, structured_content
 
 
 def extract_text_from_photo(file_path: str) -> str:
     """
-    ЗАГЛУШКА: Имитирует распознавание текста с фото.
-    Возвращает заранее заданный текст.
+    Эта функция остается РАБОЧЕЙ. Она будет работать, если вы предоставите
+    GOOGLE_APPLICATION_CREDENTIALS. Если нет, она вызовет ошибку,
+    которую обработает эндпоинт.
     """
-    print(f"--- Using STUB for extract_text_from_photo (file: {file_path}) ---")
-    return "Это тестовый текст, распознанный с изображения. Функция OCR отключена."
+    from google.cloud import vision
+    print(f"--- Calling Google Vision API for OCR (file: {file_path}) ---")
+    vision_client = vision.ImageAnnotatorClient()
+    with open(file_path, "rb") as image_file:
+        content = image_file.read()
+    image = vision.Image(content=content)
+    response = vision_client.text_detection(image=image)
+    if response.error.message:
+        raise Exception(f"Vision API error: {response.error.message}")
+    return response.full_text_annotation.text if response.full_text_annotation else ""
 
 
 def transcribe_audio(file_path: str) -> (str, List[TranscriptBlock]):
     """
-    ЗАГЛУШКА: Имитирует транскрибацию аудио.
-    Возвращает заранее заданный текст и структуру транскрипта.
+    Эта функция остается РАБОЧЕЙ. Она будет работать, если вы предоставите
+    GOOGLE_APPLICATION_CREDENTIALS.
     """
-    print(f"--- Using STUB for transcribe_audio (file: {file_path}) ---")
-    
-    # Имитируем полный текст для суммаризации
-    full_text = "Это тестовая транскрибация аудиозаписи. Функция распознавания речи отключена."
-    
-    # Имитируем структуру транскрипта для отображения
-    transcript_blocks = [
-        TranscriptBlock(time_start=0.5, text="Это"),
-        TranscriptBlock(time_start=1.0, text="тестовая"),
-        TranscriptBlock(time_start=1.8, text="транскрибация"),
-        TranscriptBlock(time_start=2.5, text="аудиозаписи."),
-    ]
-    
-    return full_text, transcript_blocks
+    from google.cloud import speech
+    print(f"--- Calling Google Speech-to-Text API (file: {file_path}) ---")
+    speech_client = speech.SpeechClient()
+    with open(file_path, "rb") as audio_file:
+        content = audio_file.read()
+    audio = speech.RecognitionAudio(content=content)
+    config = speech.RecognitionConfig(
+        encoding=speech.RecognitionConfig.AudioEncoding.MP3,
+        sample_rate_hertz=16000,
+        language_code="ru-RU",
+        enable_automatic_punctuation=True,
+        enable_word_time_offsets=True,
+    )
+    operation = speech_client.long_running_recognize(config=config, audio=audio)
+    response = operation.result(timeout=300)
+    full_text = []
+    transcript_blocks = []
+    for result in response.results:
+        alternative = result.alternatives[0]
+        full_text.append(alternative.transcript)
+        for word_info in alternative.words:
+            transcript_blocks.append(
+                TranscriptBlock(
+                    time_start=word_info.start_time.total_seconds(),
+                    text=word_info.word
+                )
+            )
+    return " ".join(full_text), transcript_blocks
 
 
 def extract_text_from_link(url: str) -> str:
     """
-    Эта функция остается рабочей, так как не зависит от Google Credentials.
-    Извлекает основной текстовый контент со страницы по URL.
+    Эта функция остается РАБОЧЕЙ, так как не зависит от Google Credentials.
     """
     try:
         headers = {
@@ -71,12 +94,9 @@ def extract_text_from_link(url: str) -> str:
         }
         response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
-
         soup = BeautifulSoup(response.content, 'html.parser')
-
         for script_or_style in soup(["script", "style"]):
             script_or_style.decompose()
-
         text = soup.get_text()
         lines = (line.strip() for line in text.splitlines())
         chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
