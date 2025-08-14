@@ -3,7 +3,7 @@
 from fastapi import (APIRouter, Depends, HTTPException, status,
                      UploadFile, File, Form, Query)
 from sqlalchemy.orm import Session
-from typing import List, Optional, Union # <-- ДОБАВЛЕН UNION
+from typing import List, Optional
 
 from db import crud, schemas, models
 from db.database import get_db
@@ -20,9 +20,8 @@ router = APIRouter(prefix="/notes", tags=["Notes"])
 def create_new_note(
     source_type: models.NoteType = Form(...),
     data: Optional[str] = Form(None),
-    # --- ИСПРАВЛЕНИЕ: Разрешаем принимать либо файл, либо строку ---
-    file: Optional[Union[UploadFile, str]] = File(None),
-    # -----------------------------------------------------------
+    # --- Возвращаемся к строгому, но опциональному типу UploadFile ---
+    file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -33,15 +32,6 @@ def create_new_note(
     structured_content = []
     source_uri = None
     text_for_vector = ""
-
-    # --- ИСПРАВЛЕНИЕ: Улучшенная обработка файла ---
-    file_path = None
-    # Проверяем, что 'file' - это действительно объект файла И у него есть имя.
-    # Это отсеет и пустые строки от Swagger, и "пустые" загрузки файлов.
-    if isinstance(file, UploadFile) and file.filename:
-        file_path = file_storage.save_file(file)
-        source_uri = file_storage.get_file_url(file_path)
-    # ---------------------------------------------
 
     # --- Логика по типам ---
     if source_type == models.NoteType.TEXT:
@@ -65,35 +55,40 @@ def create_new_note(
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Could not get subtitles from YouTube video.")
         title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "youtube")
         text_for_vector = extracted_text
-    elif source_type == models.NoteType.PDF:
-        if not file_path:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "PDF file is required for type 'pdf'.")
-        extracted_text = content_processor.get_text_from_pdf(file_path)
-        if not extracted_text:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Could not extract text from PDF file.")
-        title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "pdf")
-        text_for_vector = extracted_text
-    elif source_type == models.NoteType.DOCX:
-        if not file_path:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "DOCX file is required for type 'docx'.")
-        extracted_text = content_processor.get_text_from_docx(file_path)
-        if not extracted_text:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Could not extract text from DOCX file.")
-        title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "docx")
-        text_for_vector = extracted_text
-    elif source_type == models.NoteType.PHOTO:
-        if not file_path:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Photo file is required for type 'photo'.")
-        extracted_text = ai_processor.extract_text_from_photo(file_path)
-        title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "photo")
-        text_for_vector = extracted_text
-    elif source_type == models.NoteType.AUDIO:
-        if not file_path:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Audio file is required for type 'audio'.")
-        full_transcript, transcript_blocks = ai_processor.transcribe_audio(file_path)
-        title, _ = ai_processor.summarize_and_structure_text(full_transcript, "audio")
-        structured_content = transcript_blocks
-        text_for_vector = full_transcript
+    
+    # --- ОБЩАЯ ЛОГИКА ДЛЯ ВСЕХ ФАЙЛОВЫХ ТИПОВ ---
+    elif source_type in [models.NoteType.PDF, models.NoteType.DOCX, models.NoteType.PHOTO, models.NoteType.AUDIO]:
+        # Надежная проверка, что файл действительно был отправлен
+        if not file or not file.filename:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"A file is required for source type '{source_type.value}'."
+            )
+        
+        file_path = file_storage.save_file(file)
+        source_uri = file_storage.get_file_url(file_path)
+
+        if source_type == models.NoteType.PDF:
+            extracted_text = content_processor.get_text_from_pdf(file_path)
+            if not extracted_text:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Could not extract text from PDF file.")
+            title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "pdf")
+            text_for_vector = extracted_text
+        elif source_type == models.NoteType.DOCX:
+            extracted_text = content_processor.get_text_from_docx(file_path)
+            if not extracted_text:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Could not extract text from DOCX file.")
+            title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "docx")
+            text_for_vector = extracted_text
+        elif source_type == models.NoteType.PHOTO:
+            extracted_text = ai_processor.extract_text_from_photo(file_path)
+            title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "photo")
+            text_for_vector = extracted_text
+        elif source_type == models.NoteType.AUDIO:
+            full_transcript, transcript_blocks = ai_processor.transcribe_audio(file_path)
+            title, _ = ai_processor.summarize_and_structure_text(full_transcript, "audio")
+            structured_content = transcript_blocks
+            text_for_vector = full_transcript
     else:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or unsupported source type.")
 
