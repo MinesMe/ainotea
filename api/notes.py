@@ -3,7 +3,7 @@
 from fastapi import (APIRouter, Depends, HTTPException, status,
                      UploadFile, File, Form, Query)
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Union # <-- ДОБАВЛЕН UNION
 
 from db import crud, schemas, models
 from db.database import get_db
@@ -20,7 +20,9 @@ router = APIRouter(prefix="/notes", tags=["Notes"])
 def create_new_note(
     source_type: models.NoteType = Form(...),
     data: Optional[str] = Form(None),
-    file: Optional[UploadFile] = File(None),
+    # --- ИСПРАВЛЕНИЕ: Разрешаем принимать либо файл, либо строку ---
+    file: Optional[Union[UploadFile, str]] = File(None),
+    # -----------------------------------------------------------
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -32,11 +34,14 @@ def create_new_note(
     source_uri = None
     text_for_vector = ""
 
-    # --- Обработка файловых источников (если файл был передан) ---
+    # --- ИСПРАВЛЕНИЕ: Улучшенная обработка файла ---
     file_path = None
-    if file:
+    # Проверяем, что 'file' - это действительно объект файла И у него есть имя.
+    # Это отсеет и пустые строки от Swagger, и "пустые" загрузки файлов.
+    if isinstance(file, UploadFile) and file.filename:
         file_path = file_storage.save_file(file)
         source_uri = file_storage.get_file_url(file_path)
+    # ---------------------------------------------
 
     # --- Логика по типам ---
     if source_type == models.NoteType.TEXT:
