@@ -1,107 +1,120 @@
 # file: services/ai_processor.py
 
-import requests
-from bs4 import BeautifulSoup
-from typing import List, Union
+from openai import AsyncOpenAI, OpenAI # <-- ДОБАВЛЯЕМ СИНХРОННЫЙ OpenAI В ИМПОРТ
+from core.config import settings
+from typing import List, Dict, Any
+import os
+import json
 
-# Импортируем только схемы, так как нам не нужны реальные клиенты API
-from db.schemas import TextBlock, TranscriptBlock
-
-# --- Сообщения для логов, чтобы было понятно, что сервисы отключены ---
-print("AI PROCESSOR: LLM summarization is DISABLED (using stubs).")
-# ПРИМЕЧАНИЕ: Google Cloud Vision и Speech могут быть активны, если credentials предоставлены.
-
-
-# --- Функции-заглушки и рабочие функции ---
-
-def summarize_and_structure_text(text: str, original_type: str) -> (str, List[TextBlock]):
-    """
-    ЗАГЛУШКА: Вместо обращения к LLM, просто возвращает заголовок
-    и исходный текст в виде одного блока. Эта функция больше не вызывает Gemini.
-    """
-    print("--- Using STUB for summarize_and_structure_text (LLM is OFF) ---")
-    if not text or len(text.strip()) < 1:
-        return "Пустая заметка", [TextBlock(text="Содержимое отсутствует.")]
-
-    # Создаем простой заголовок
-    title = f"Заметка из '{original_type}': {text[:30]}..."
-    # Возвращаем исходный текст как есть, в виде одного блока
-    structured_content = [TextBlock(header="Извлеченный текст", text=text)]
-
-    return title, structured_content
+# --- Инициализация АСИНХРОННОГО клиента OpenAI ---
+try:
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    print("Async OpenAI client initialized successfully.")
+except Exception as e:
+    client = None
+    print(f"CRITICAL: Could not initialize OpenAI client. Error: {e}")
 
 
-def extract_text_from_photo(file_path: str) -> str:
-    """
-    Эта функция остается РАБОЧЕЙ. Она будет работать, если вы предоставите
-    GOOGLE_APPLICATION_CREDENTIALS. Если нет, она вызовет ошибку,
-    которую обработает эндпоинт.
-    """
-    from google.cloud import vision
-    print(f"--- Calling Google Vision API for OCR (file: {file_path}) ---")
-    vision_client = vision.ImageAnnotatorClient()
-    with open(file_path, "rb") as image_file:
-        content = image_file.read()
-    image = vision.Image(content=content)
-    response = vision_client.text_detection(image=image)
-    if response.error.message:
-        raise Exception(f"Vision API error: {response.error.message}")
-    return response.full_text_annotation.text if response.full_text_annotation else ""
-
-
-def transcribe_audio(file_path: str) -> (str, List[TranscriptBlock]):
-    """
-    Эта функция остается РАБОЧЕЙ. Она будет работать, если вы предоставите
-    GOOGLE_APPLICATION_CREDENTIALS.
-    """
-    from google.cloud import speech
-    print(f"--- Calling Google Speech-to-Text API (file: {file_path}) ---")
-    speech_client = speech.SpeechClient()
-    with open(file_path, "rb") as audio_file:
-        content = audio_file.read()
-    audio = speech.RecognitionAudio(content=content)
-    config = speech.RecognitionConfig(
-        encoding=speech.RecognitionConfig.AudioEncoding.MP3,
-        sample_rate_hertz=16000,
-        language_code="ru-RU",
-        enable_automatic_punctuation=True,
-        enable_word_time_offsets=True,
-    )
-    operation = speech_client.long_running_recognize(config=config, audio=audio)
-    response = operation.result(timeout=300)
-    full_text = []
-    transcript_blocks = []
-    for result in response.results:
-        alternative = result.alternatives[0]
-        full_text.append(alternative.transcript)
-        for word_info in alternative.words:
-            transcript_blocks.append(
-                TranscriptBlock(
-                    time_start=word_info.start_time.total_seconds(),
-                    text=word_info.word
-                )
-            )
-    return " ".join(full_text), transcript_blocks
-
-
-def extract_text_from_link(url: str) -> str:
-    """
-    Эта функция остается РАБОЧЕЙ, так как не зависит от Google Credentials.
-    """
+# --- Функция для транскрибации аудио (теперь работает правильно) ---
+def transcribe_audio_with_whisper(file_path: str) -> str:
+    # Для синхронной функции создаем временный синхронный клиент
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(url, headers=headers, timeout=15)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
-        for script_or_style in soup(["script", "style"]):
-            script_or_style.decompose()
-        text = soup.get_text()
-        lines = (line.strip() for line in text.splitlines())
-        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-        text = '\n'.join(chunk for chunk in chunks if chunk)
-        return text
-    except requests.RequestException as e:
-        print(f"Error fetching URL {url}: {e}")
-        return ""
+        # Используем импортированный синхронный клиент
+        sync_client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        print(f"--- Transcribing audio file: {file_path} with Whisper ---")
+        with open(file_path, "rb") as audio_file:
+            transcript = sync_client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                response_format="text"
+            )
+        return transcript
+    except Exception as e:
+        print(f"Error during Whisper transcription: {e}")
+        return f"Ошибка транскрибации аудио: {e}"
+
+
+# --- Функции для генерации контента с помощью ChatGPT (без изменений) ---
+
+async def generate_summary(text: str) -> Dict[str, Any]:
+    prompt = f"""
+    Проанализируй следующий текст и создай для него краткое, но емкое саммари.
+    Верни результат СТРОГО в виде словаря Python с ключами "key_points" и "conclusion".
+    Пример: {{"key_points": ["Тезис 1."], "conclusion": "Вывод."}}
+    Текст:
+    ---
+    {text}
+    ---
+    """
+    response_obj = await _call_chatgpt_and_parse(prompt)
+    if not response_obj:
+        return {"key_points": ["Ошибка генерации."], "conclusion": "Не удалось разобрать ответ от AI."}
+    return response_obj
+
+async def generate_flashcards(text: str) -> List[Dict[str, str]]:
+    prompt = f"""
+    Проанализируй текст и создай набор флеш-карт.
+    Верни результат СТРОГО в виде списка словарей Python.
+    Пример: [{{"term": "Термин", "definition": "Определение"}}]
+    Текст:
+    ---
+    {text}
+    ---
+    """
+    response_obj = await _call_chatgpt_and_parse(prompt)
+    if not response_obj:
+        return [{"term": "Ошибка генерации", "definition": "Не удалось разобрать ответ от AI."}]
+    return response_obj
+
+async def generate_quiz(text: str) -> Dict[str, Any]:
+    prompt = f"""
+    Проанализируй текст и создай квиз.
+    Верни результат СТРОГО в виде словаря Python с ключами "title" и "questions".
+    Пример: {{"title": "Квиз", "questions": [{{"question": "Вопрос?", "options": [], "correct_answer": "", "explanation": ""}}]}}
+    Текст:
+    ---
+    {text}
+    ---
+    """
+    response_obj = await _call_chatgpt_and_parse(prompt)
+    if not response_obj:
+        return {"title": "Ошибка генерации", "questions": []}
+    return response_obj
+
+
+async def _call_chatgpt_and_parse(prompt: str) -> Any:
+    if not client:
+        raise ConnectionError("OpenAI client is not initialized.")
+    
+    print("--- Calling ChatGPT API (gpt-4o) ---")
+    try:
+        chat_completion = await client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Ты — полезный ИИ-ассистент. Всегда отвечай СТРОГО в формате JSON (словарь или список словарей Python), без какого-либо дополнительного текста или объяснений.",
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            model="gpt-4o",
+        )
+        raw_response = chat_completion.choices[0].message.content
+        print(f"Raw response from AI: {raw_response}")
+
+        start_brace = raw_response.find('{')
+        start_bracket = raw_response.find('[')
+        if start_brace == -1 and start_bracket == -1: return None
+        if start_brace == -1: start_brace = float('inf')
+        if start_bracket == -1: start_bracket = float('inf')
+        start_index = min(start_brace, start_bracket)
+        end_index = raw_response.rfind('}') if raw_response[start_index] == '{' else raw_response.rfind(']')
+        if end_index == -1: return None
+        json_string = raw_response[start_index : end_index + 1]
+        return json.loads(json_string)
+
+    except Exception as e:
+        print(f"Error during ChatGPT call or parsing: {e}")
+        return None

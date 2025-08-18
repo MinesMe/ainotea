@@ -3,7 +3,6 @@
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
-# Импортируем наши модели (для запросов к БД) и схемы (для типизации)
 from . import models, schemas
 
 # --- Функции для работы с Пользователями (User) ---
@@ -32,28 +31,16 @@ def get_all_notes_by_user(db: Session, user_id: int) -> List[models.Note]:
 
 def create_note(db: Session, note: schemas.NoteCreate, user_id: int) -> models.Note:
     """Создает новую заметку для пользователя."""
-    # .model_dump() преобразует Pydantic схему в словарь, готовый для SQLAlchemy
     db_note = models.Note(**note.model_dump(), user_id=user_id)
     db.add(db_note)
     db.commit()
     db.refresh(db_note)
     return db_note
 
-def update_note_content(db: Session, note_id: int, title: str, content: list) -> Optional[models.Note]:
-    """Обновляет заголовок и содержимое существующей заметки."""
-    db_note = db.query(models.Note).filter(models.Note.id == note_id).first()
-    if db_note:
-        db_note.title = title
-        db_note.content = [item.model_dump() for item in content] # Сохраняем как JSON
-        db.commit()
-        db.refresh(db_note)
-    return db_note
-
 def add_note_to_folder(db: Session, note_id: int, folder_id: int, user_id: int) -> Optional[models.Note]:
     """Добавляет заметку в папку, проверяя, что и папка, и заметка принадлежат пользователю."""
     db_note = get_note_by_id(db, note_id, user_id)
     db_folder = get_folder_by_id(db, folder_id, user_id)
-
     if db_note and db_folder:
         db_note.folder_id = folder_id
         db.commit()
@@ -78,3 +65,15 @@ def create_folder(db: Session, folder: schemas.FolderCreate, user_id: int) -> mo
     db.commit()
     db.refresh(db_folder)
     return db_folder
+
+# --- Функция для сохранения AI-контента ---
+def create_ai_content(db: Session, content: schemas.AIGeneratedContentCreate, note_id: int) -> models.AIGeneratedContent:
+    """Сохраняет сгенерированный AI-контент в базу данных, привязывая его к заметке."""
+    db_content = models.AIGeneratedContent(
+        **content.model_dump(),
+        note_id=note_id
+    )
+    db.add(db_content)
+    db.commit()
+    db.refresh(db_content)
+    return db_content

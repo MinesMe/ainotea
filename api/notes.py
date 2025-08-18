@@ -20,31 +20,38 @@ router = APIRouter(prefix="/notes", tags=["Notes"])
 def create_new_note(
     source_type: models.NoteType = Form(...),
     data: Optional[str] = Form(None),
-    # --- Возвращаемся к строгому, но опциональному типу UploadFile ---
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Создает новую заметку из разных источников (текст, ссылка, фото, аудио, YouTube, PDF, DOCX).
+    Создает новую заметку из разных источников (текст, ссылка, аудио через Whisper, YouTube, PDF, DOCX).
     """
     title = "Новая заметка"
     structured_content = []
     source_uri = None
     text_for_vector = ""
 
+    # --- Обработка файловых источников (если файл был передан) ---
+    file_path = None
+    if file and file.filename:
+        file_path = file_storage.save_file(file)
+        source_uri = file_storage.get_file_url(file_path)
+
     # --- Логика по типам ---
     if source_type == models.NoteType.TEXT:
         if not data:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Text data is required for type 'text'.")
-        title, structured_content = ai_processor.summarize_and_structure_text(data, "text")
+        title = f"Текстовая заметка: {data[:30]}..."
+        structured_content = [schemas.TextBlock(text=data)]
         text_for_vector = data
     elif source_type == models.NoteType.LINK:
         if not data:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "URL data is required for type 'link'.")
         source_uri = data
-        extracted_text = ai_processor.extract_text_from_link(data)
-        title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "link")
+        extracted_text = content_processor.extract_text_from_link(data)
+        title = f"Заметка из ссылки: {data[:40]}..."
+        structured_content = [schemas.TextBlock(text=extracted_text)]
         text_for_vector = extracted_text
     elif source_type == models.NoteType.YOUTUBE:
         if not data:
@@ -53,42 +60,43 @@ def create_new_note(
         extracted_text = content_processor.get_text_from_youtube(data)
         if not extracted_text:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Could not get subtitles from YouTube video.")
-        title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "youtube")
+        title = f"Заметка из YouTube: {data[:40]}..."
+        structured_content = [schemas.TextBlock(text=extracted_text)]
+        text_for_vector = extracted_text
+    elif source_type == models.NoteType.PDF:
+        if not file_path:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "PDF file is required for type 'pdf'.")
+        extracted_text = content_processor.get_text_from_pdf(file_path)
+        if not extracted_text:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Could not extract text from PDF file.")
+        title = f"Заметка из PDF: {file.filename}"
+        structured_content = [schemas.TextBlock(text=extracted_text)]
+        text_for_vector = extracted_text
+    elif source_type == models.NoteType.DOCX:
+        if not file_path:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "DOCX file is required for type 'docx'.")
+        extracted_text = content_processor.get_text_from_docx(file_path)
+        if not extracted_text:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Could not extract text from DOCX file.")
+        title = f"Заметка из DOCX: {file.filename}"
+        structured_content = [schemas.TextBlock(text=extracted_text)]
         text_for_vector = extracted_text
     
-    # --- ОБЩАЯ ЛОГИКА ДЛЯ ВСЕХ ФАЙЛОВЫХ ТИПОВ ---
-    elif source_type in [models.NoteType.PDF, models.NoteType.DOCX, models.NoteType.PHOTO, models.NoteType.AUDIO]:
-        # Надежная проверка, что файл действительно был отправлен
-        if not file or not file.filename:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"A file is required for source type '{source_type.value}'."
-            )
+    # --- ИЗМЕНЕННАЯ ЛОГИКА ДЛЯ АУДИО ---
+    elif source_type == models.NoteType.AUDIO:
+        if not file_path:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Audio file is required for type 'audio'.")
         
-        file_path = file_storage.save_file(file)
-        source_uri = file_storage.get_file_url(file_path)
-
-        if source_type == models.NoteType.PDF:
-            extracted_text = content_processor.get_text_from_pdf(file_path)
-            if not extracted_text:
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Could not extract text from PDF file.")
-            title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "pdf")
-            text_for_vector = extracted_text
-        elif source_type == models.NoteType.DOCX:
-            extracted_text = content_processor.get_text_from_docx(file_path)
-            if not extracted_text:
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Could not extract text from DOCX file.")
-            title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "docx")
-            text_for_vector = extracted_text
-        elif source_type == models.NoteType.PHOTO:
-            extracted_text = ai_processor.extract_text_from_photo(file_path)
-            title, structured_content = ai_processor.summarize_and_structure_text(extracted_text, "photo")
-            text_for_vector = extracted_text
-        elif source_type == models.NoteType.AUDIO:
-            full_transcript, transcript_blocks = ai_processor.transcribe_audio(file_path)
-            title, _ = ai_processor.summarize_and_structure_text(full_transcript, "audio")
-            structured_content = transcript_blocks
-            text_for_vector = full_transcript
+        # Используем новую функцию транскрибации через Whisper
+        full_transcript = ai_processor.transcribe_audio_with_whisper(file_path)
+        
+        title = f"Транскрипция аудио: {file.filename}"
+        # Сохраняем полный транскрипт как простой текст
+        structured_content = [schemas.TextBlock(text=full_transcript)]
+        text_for_vector = full_transcript
+    
+    # Мы убрали PHOTO, так как Google Vision больше не используется
+    # Если нужно будет вернуть, можно будет добавить сюда
     else:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or unsupported source type.")
 
@@ -117,9 +125,6 @@ def get_all_user_notes(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """
-    Возвращает список всех заметок текущего пользователя.
-    """
     return crud.get_all_notes_by_user(db=db, user_id=current_user.id)
 
 
@@ -129,20 +134,12 @@ def find_notes_by_semantic_search(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """
-    Выполняет семантический ("умный") поиск по всем заметкам пользователя.
-    """
     if not q.strip():
         return []
-
     note_ids = vector_store.search_notes(user_id=current_user.id, query_text=q)
-
     if not note_ids:
         return []
-
     notes = db.query(models.Note).filter(models.Note.id.in_(note_ids)).all()
-    
     notes_map = {note.id: note for note in notes}
     sorted_notes = [notes_map[id] for id in note_ids if id in notes_map]
-
     return sorted_notes

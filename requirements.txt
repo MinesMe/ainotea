@@ -1,5 +1,6 @@
 fastapi
 uvicorn[standard]
+python-multipart
 sqlalchemy
 psycopg2-binary
 pydantic[email]
@@ -7,18 +8,12 @@ pydantic-settings
 python-jose[cryptography]
 passlib[bcrypt]
 python-dotenv
+requests
+beautifulsoup4
 chromadb
 sentence-transformers
-google-cloud-aiplatform
-google-cloud-vision
-google-cloud-speech
-google-cloud-texttospeech
-ffmpeg-python
-beautifulsoup4
-requests
-python-multipart
+openai
 youtube-transcript-api
-# Для чтения PDF-файлов
 PyMuPDF
-# Для чтения DOCX-файлов (на всякий случай, так как он был в content_processor)
 python-docx
+ffmpeg-python  
