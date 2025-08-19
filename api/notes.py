@@ -25,7 +25,7 @@ def create_new_note(
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Создает новую заметку из разных источников (текст, ссылка, аудио через Whisper, YouTube, PDF, DOCX).
+    Создает новую заметку из разных источников (текст, ссылка, фото, аудио, запись, YouTube, PDF, DOCX).
     """
     title = "Новая заметка"
     structured_content = []
@@ -82,21 +82,29 @@ def create_new_note(
         structured_content = [schemas.TextBlock(text=extracted_text)]
         text_for_vector = extracted_text
     
-    # --- ИЗМЕНЕННАЯ ЛОГИКА ДЛЯ АУДИО ---
-    elif source_type == models.NoteType.AUDIO:
+    # --- ОБЩАЯ ЛОГИКА ДЛЯ ВСЕХ ФАЙЛОВЫХ ТИПОВ, ТРЕБУЮЩИХ ФАЙЛ ---
+    elif source_type in [models.NoteType.PHOTO, models.NoteType.AUDIO, models.NoteType.RECORD]:
         if not file_path:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Audio file is required for type 'audio'.")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"A file is required for source type '{source_type.value}'."
+            )
         
-        # Используем новую функцию транскрибации через Whisper
-        full_transcript = ai_processor.transcribe_audio_with_whisper(file_path)
+        if source_type == models.NoteType.PHOTO:
+            # Логика для фото (если будет добавлена)
+            # extracted_text = ai_processor.extract_text_from_photo(file_path)
+            # title = f"Заметка из фото: {file.filename}"
+            # structured_content = [schemas.TextBlock(text=extracted_text)]
+            # text_for_vector = extracted_text
+            pass # Пока пропускаем
         
-        title = f"Транскрипция аудио: {file.filename}"
-        # Сохраняем полный транскрипт как простой текст
-        structured_content = [schemas.TextBlock(text=full_transcript)]
-        text_for_vector = full_transcript
-    
-    # Мы убрали PHOTO, так как Google Vision больше не используется
-    # Если нужно будет вернуть, можно будет добавить сюда
+        # Обрабатываем AUDIO и RECORD одинаково
+        elif source_type in [models.NoteType.AUDIO, models.NoteType.RECORD]:
+            full_transcript = ai_processor.transcribe_audio_with_whisper(file_path)
+            title = f"Транскрипция аудио: {file.filename}"
+            structured_content = [schemas.TextBlock(text=full_transcript)]
+            text_for_vector = full_transcript
+            
     else:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or unsupported source type.")
 

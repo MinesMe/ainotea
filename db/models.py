@@ -15,6 +15,7 @@ class NoteType(str, enum.Enum):
     YOUTUBE = "youtube"
     PDF = "pdf"
     DOCX = "docx"
+    RECORD = "record"
 
 class User(Base):
     __tablename__ = "users"
