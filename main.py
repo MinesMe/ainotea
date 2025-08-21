@@ -35,6 +35,7 @@ app = FastAPI(
     title="AI Note Taker API",
     description="Бэкэнд для умного приложения по ведению заметок с функциями OpenAI.",
     version="2.0.0",
+    swagger_ui_parameters={"persistAuthorization": True}  
 )
 
 # 3. Создание директорий для статических файлов

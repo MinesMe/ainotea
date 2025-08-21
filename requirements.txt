@@ -13,7 +13,7 @@ beautifulsoup4
 chromadb
 sentence-transformers
 openai
-youtube-transcript-api
+youtube-transcript-api==1.1.1
 PyMuPDF
 python-docx
 ffmpeg-python  

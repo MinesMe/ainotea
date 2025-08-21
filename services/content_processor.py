@@ -1,43 +1,17 @@
-# file: services/content_processor.py
-
-from youtube_transcript_api import YouTubeTranscriptApi
 import docx
 import fitz
 import os
 
+# Импортируем наш рабочий модуль-помощник
+from . import youtube_helper
+
 def get_text_from_youtube(url: str):
     """
-    Пытается получить существующие субтитры из видео на YouTube.
-    Использует библиотеку youtube-transcript-api.
-    Возвращает текст в случае успеха, иначе None.
+    Эта функция вызывается из notes.py.
+    Она просто передает URL в наш отлаженный модуль youtube_helper.
     """
-    video_id = None
-    # Улучшаем извлечение ID для разных форматов ссылок
-    if "v=" in url:
-        video_id = url.split("v=")[-1].split("&")[0]
-    elif "youtu.be/" in url:
-        video_id = url.split("youtu.be/")[-1].split("?")[0]
-    
-    if not video_id:
-        print(f"Could not extract video_id from URL: {url}")
-        return None
-
-    try:
-        print(f"Attempting to fetch transcript for video_id: {video_id} using youtube-transcript-api...")
-        # Пытаемся получить вручную созданные или автоматически сгенерированные
-        # транскрипты на английском или русском языках.
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'ru'])
-        
-        # Собираем текст из всех полученных фрагментов
-        full_transcript = " ".join([item['text'] for item in transcript_list])
-        
-        print(f"Successfully fetched subtitles for YouTube video: {video_id}")
-        return full_transcript
-        
-    except Exception as e:
-        # Эта ошибка возникает, если субтитры не найдены или доступ к ним ограничен
-        print(f"Could not get subtitles for video_id {video_id} using youtube-transcript-api. Reason: {e}.")
-        return None
+    print("--- content_processor: Вызываю youtube_helper.fetch_transcript ---")
+    return youtube_helper.fetch_transcript(url)
 
 
 def get_text_from_docx(file_path: str):
