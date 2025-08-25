@@ -8,7 +8,18 @@ from enum import Enum
 # Импортируем наш Enum из моделей, чтобы использовать его и здесь
 from .models import NoteType
 
-# --- Вспомогательные схемы для структурированного контента ---
+# --- НОВЫЙ ENUM ДЛЯ ИСТОЧНИКОВ ТЕКСТА ---
+class AddTextSourceType(str, Enum):
+    """Перечисление для всех доступных источников добавления текста в заметку."""
+    TEXT = "text"
+    LINK = "link"
+    YOUTUBE = "youtube"
+    PDF = "pdf"
+    DOCX = "docx"
+    AUDIO = "audio"
+    RECORD = "record"
+
+# --- Вспомогательные схемы (без изменений) ---
 
 class TextBlock(BaseModel):
     """Схема для одного блока текста с заголовками."""
@@ -21,7 +32,7 @@ class TranscriptBlock(BaseModel):
     time_start: float
     text: str
 
-# --- Схемы для Аутентификации ---
+# --- Схемы для Аутентификации (без изменений) ---
 
 class UserCreate(BaseModel):
     """Схема для создания пользователя (регистрации)."""
@@ -50,6 +61,10 @@ class FolderCreate(FolderBase):
     """Схема для создания папки (наследуется от базовой)."""
     pass
 
+class FolderUpdate(BaseModel):
+    """Схема для обновления папки. Все поля опциональны."""
+    name: Optional[str] = None
+
 class Folder(FolderBase):
     """Схема для отображения папки."""
     id: int
@@ -71,8 +86,10 @@ class NoteCreate(NoteBase):
     pass
 
 class NoteUpdate(BaseModel):
-    """Схема для обновления заметки (например, для перемещения в папку)."""
-    folder_id: Optional[int] = None
+    """Схема для обновления заметки. Все поля опциональны."""
+    title: Optional[str] = None
+    folder_id: Optional[int] = Field(None, nullable=True)
+
 
 class Note(NoteBase):
     """Схема для отображения полной информации о заметке."""
@@ -83,23 +100,19 @@ class Note(NoteBase):
     class Config:
         from_attributes = True
 
-# --- НОВЫЕ СХЕМЫ ДЛЯ AI-ЗАДАЧ ---
+# --- Схемы для AI-задач ---
 
 class AITaskType(str, Enum):
-    """Перечисление для всех доступных типов AI-задач."""
+    """
+    Перечисление для всех доступных типов AI-задач.
+    """
     SUMMARY = "summary"
     FLASHCARDS = "flashcards"
     QUIZ = "quiz"
 
-class AITaskRequest(BaseModel):
-    """Схема для запроса на генерацию AI-контента."""
-    note_id: int
-    task_type: AITaskType
-
 class AIGeneratedContentBase(BaseModel):
     """Базовая схема для сгенерированного контента."""
     content_type: AITaskType
-    # Используем 'Any', так как структура данных будет разной
     data: Any
 
 class AIGeneratedContentCreate(AIGeneratedContentBase):
@@ -114,12 +127,19 @@ class AIGeneratedContent(AIGeneratedContentBase):
     class Config:
         from_attributes = True
 
-# --- Схемы для Видео ---
+# --- Схемы для Видео (без изменений) ---
+
+class VoiceName(str, Enum):
+    """Перечисление доступных голосов для озвучки видео."""
+    FEMALE_STANDARD = "ru-RU-Wavenet-D"
+    MALE_STANDARD = "ru-RU-Wavenet-E"
+    FEMALE_ALT = "ru-RU-Wavenet-A"
+    MALE_ALT = "ru-RU-Wavenet-B"
 
 class VideoRequest(BaseModel):
     """Схема для запроса на генерацию видео."""
     note_id: int
-    voice_name: str = "ru-RU-Wavenet-D"
+    voice_name: VoiceName = VoiceName.FEMALE_STANDARD
 
 class VoiceSample(BaseModel):
     """Схема для описания одного примера голоса."""

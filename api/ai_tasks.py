@@ -1,6 +1,6 @@
 # file: api/ai_tasks.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Form
 from sqlalchemy.orm import Session
 from datetime import datetime
 
@@ -15,7 +15,8 @@ router = APIRouter(prefix="/ai", tags=["AI Tasks"])
 
 @router.post("/generate", response_model=schemas.AIGeneratedContent)
 async def generate_ai_content(
-    task_request: schemas.AITaskRequest,
+    note_id: int = Form(...),
+    task_type: schemas.AITaskType = Form(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -25,7 +26,7 @@ async def generate_ai_content(
     """
     # --- СИНХРОННЫЙ БЛОК: РАБОТА С БАЗОЙ ДАННЫХ ---
     # 1. Находим заметку в БД и проверяем, что она принадлежит текущему пользователю
-    note = crud.get_note_by_id(db, note_id=task_request.note_id, user_id=current_user.id)
+    note = crud.get_note_by_id(db, note_id=note_id, user_id=current_user.id)
     if not note:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -48,11 +49,11 @@ async def generate_ai_content(
 
     # --- АСИНХРОННЫЙ БЛОК: РАБОТА С OpenAI ---
     generated_data = None
-    if task_request.task_type == schemas.AITaskType.SUMMARY:
+    if task_type == schemas.AITaskType.SUMMARY:
         generated_data = await ai_processor.generate_summary(text_content)
-    elif task_request.task_type == schemas.AITaskType.FLASHCARDS:
+    elif task_type == schemas.AITaskType.FLASHCARDS:
         generated_data = await ai_processor.generate_flashcards(text_content)
-    elif task_request.task_type == schemas.AITaskType.QUIZ:
+    elif task_type == schemas.AITaskType.QUIZ:
         generated_data = await ai_processor.generate_quiz(text_content)
     
     if not generated_data or isinstance(generated_data, str): # Добавили проверку на строку (в случае ошибки)
@@ -64,7 +65,7 @@ async def generate_ai_content(
 
     # --- СНОВА СИНХРОННЫЙ БЛОК: СОХРАНЕНИЕ В БД ---
     ai_content_to_create = schemas.AIGeneratedContentCreate(
-        content_type=task_request.task_type,
+        content_type=task_type,
         data=generated_data
     )
     

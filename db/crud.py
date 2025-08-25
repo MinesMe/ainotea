@@ -1,6 +1,7 @@
 # file: db/crud.py
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from typing import List, Optional
 
 from . import models, schemas
@@ -37,6 +38,39 @@ def create_note(db: Session, note: schemas.NoteCreate, user_id: int) -> models.N
     db.refresh(db_note)
     return db_note
 
+def update_note(db: Session, note_id: int, user_id: int, note_update: schemas.NoteUpdate) -> Optional[models.Note]:
+    """Обновляет заметку (название, папка) для пользователя."""
+    db_note = get_note_by_id(db, note_id=note_id, user_id=user_id)
+    if not db_note:
+        return None
+    
+    update_data = note_update.model_dump(exclude_unset=True)
+
+    if 'folder_id' in update_data:
+        db_note.folder_id = update_data['folder_id']
+    if 'title' in update_data:
+        db_note.title = update_data['title']
+
+    db.commit()
+    db.refresh(db_note)
+    return db_note
+
+def append_text_block_to_note(db: Session, db_note: models.Note, text_block: schemas.TextBlock) -> models.Note:
+    """Добавляет новый текстовый блок в content заметки."""
+    if not db_note.content:
+        db_note.content = []
+    
+    # Добавляем новый блок как словарь
+    db_note.content.append(text_block.model_dump())
+    
+    # Явно указываем SQLAlchemy, что JSON-поле было изменено
+    flag_modified(db_note, "content")
+    
+    db.commit()
+    db.refresh(db_note)
+    return db_note
+
+
 def add_note_to_folder(db: Session, note_id: int, folder_id: int, user_id: int) -> Optional[models.Note]:
     """Добавляет заметку в папку, проверяя, что и папка, и заметка принадлежат пользователю."""
     db_note = get_note_by_id(db, note_id, user_id)
@@ -45,6 +79,15 @@ def add_note_to_folder(db: Session, note_id: int, folder_id: int, user_id: int) 
         db_note.folder_id = folder_id
         db.commit()
         db.refresh(db_note)
+        return db_note
+    return None
+
+def delete_note_by_id(db: Session, note_id: int, user_id: int) -> Optional[models.Note]:
+    """Удаляет заметку по ID, если она принадлежит пользователю."""
+    db_note = get_note_by_id(db, note_id=note_id, user_id=user_id)
+    if db_note:
+        db.delete(db_note)
+        db.commit()
         return db_note
     return None
 
@@ -65,6 +108,29 @@ def create_folder(db: Session, folder: schemas.FolderCreate, user_id: int) -> mo
     db.commit()
     db.refresh(db_folder)
     return db_folder
+
+def update_folder(db: Session, folder_id: int, user_id: int, folder_update: schemas.FolderUpdate) -> Optional[models.Folder]:
+    """Обновляет название папки для пользователя."""
+    db_folder = get_folder_by_id(db, folder_id=folder_id, user_id=user_id)
+    if not db_folder:
+        return None
+    
+    update_data = folder_update.model_dump(exclude_unset=True)
+    if 'name' in update_data:
+        db_folder.name = update_data['name']
+    
+    db.commit()
+    db.refresh(db_folder)
+    return db_folder
+
+def delete_folder_by_id(db: Session, folder_id: int, user_id: int) -> Optional[models.Folder]:
+    """Удаляет папку по ID, если она принадлежит пользователю."""
+    db_folder = get_folder_by_id(db, folder_id=folder_id, user_id=user_id)
+    if db_folder:
+        db.delete(db_folder)
+        db.commit()
+        return db_folder
+    return None
 
 # --- Функция для сохранения AI-контента ---
 def create_ai_content(db: Session, content: schemas.AIGeneratedContentCreate, note_id: int) -> models.AIGeneratedContent:
