@@ -3,7 +3,7 @@
 from fastapi import (APIRouter, Depends, HTTPException, status,
                      UploadFile, File, Form, Query, Response)
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Any, Tuple
 
 # Импортируем все зависимости
 from db import crud, schemas, models
@@ -21,12 +21,13 @@ router = APIRouter(prefix="/notes", tags=["Notes"])
 def _extract_text_from_source(
     source_type: schemas.AddTextSourceType,
     data: Optional[str] = None,
+    # 👇 ИСПРАВЛЕНИЕ: Возвращаем правильный тип UploadFile
     file: Optional[UploadFile] = None
-) -> str:
-    """Извлекает текст из различных источников (текст, ссылка, файл)."""
+) -> Tuple[str, Optional[str]]:
+    """Извлекает текст из различных источников и возвращает текст и путь к файлу (если есть)."""
     extracted_text = ""
+    file_path: Optional[str] = None
     
-    # --- Блок для источников, использующих 'data' (текст/ссылка) ---
     if source_type in [schemas.AddTextSourceType.TEXT, schemas.AddTextSourceType.LINK, schemas.AddTextSourceType.YOUTUBE]:
         if not data:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Для этого типа источника необходимо поле 'data'.")
@@ -37,9 +38,8 @@ def _extract_text_from_source(
         elif source_type == schemas.AddTextSourceType.YOUTUBE:
             extracted_text = content_processor.get_text_from_youtube(data)
 
-    # --- Блок для источников, использующих 'file' ---
     elif source_type in [schemas.AddTextSourceType.PDF, schemas.AddTextSourceType.DOCX, schemas.AddTextSourceType.AUDIO, schemas.AddTextSourceType.RECORD]:
-        # 👇 ИЗМЕНЕНИЕ ЗДЕСЬ: Проверяем не только 'file', но и 'file.filename'
+        # Простая и надежная проверка
         if not file or not file.filename:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Для этого типа источника необходимо прикрепить файл.")
         
@@ -54,7 +54,7 @@ def _extract_text_from_source(
     if not extracted_text or not extracted_text.strip():
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Не удалось извлечь текст из источника типа '{source_type.value}'.")
         
-    return extracted_text
+    return extracted_text, file_path
 
 
 def _create_and_save_note(
@@ -84,7 +84,7 @@ def create_note_from_data(
 ):
     """Создает новую заметку из текста, обычной ссылки или YouTube URL."""
     add_text_source_type = schemas.AddTextSourceType(source_type.value)
-    extracted_text = _extract_text_from_source(source_type=add_text_source_type, data=data)
+    extracted_text, _ = _extract_text_from_source(source_type=add_text_source_type, data=data)
     
     title_map = {
         models.NoteType.TEXT: f"Текстовая заметка: {data[:30]}...",
@@ -102,16 +102,17 @@ def create_note_from_data(
 @router.post("/new/from_file", response_model=schemas.Note, status_code=status.HTTP_201_CREATED)
 def create_note_from_file(
     source_type: models.NoteType = Form(...), 
+    # 👇 ИСПРАВЛЕНИЕ: Возвращаем строгий и правильный тип UploadFile
     file: UploadFile = File(...),
     db: Session = Depends(get_db), 
     current_user: models.User = Depends(get_current_user)
 ):
     """Создает новую заметку из загруженного файла (PDF, DOCX, аудио)."""
     add_text_source_type = schemas.AddTextSourceType(source_type.value)
-    extracted_text = _extract_text_from_source(source_type=add_text_source_type, file=file)
+    extracted_text, file_path = _extract_text_from_source(source_type=add_text_source_type, file=file)
     
     title = f"Заметка из файла: {file.filename}"
-    source_uri = file_storage.get_file_url(file_storage.get_path_from_filename(file.filename))
+    source_uri = file_storage.get_file_url(file_path) if file_path else None
 
     return _create_and_save_note(
         db, current_user, title, source_type, 
@@ -123,6 +124,7 @@ def add_text_to_note(
     note_id: int,
     source_type: schemas.AddTextSourceType = Form(...),
     data: Optional[str] = Form(None),
+    # 👇 ИСПРАВЛЕНИЕ: Указываем правильный тип для необязательного файла
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
@@ -132,7 +134,7 @@ def add_text_to_note(
     if not db_note:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Заметка с ID {note_id} не найдена.")
 
-    extracted_text = _extract_text_from_source(source_type=source_type, data=data, file=file)
+    extracted_text, _ = _extract_text_from_source(source_type=source_type, data=data, file=file)
     new_text_block = schemas.TextBlock(
         header=f"Добавлено из '{source_type.value}'",
         text=extracted_text
@@ -190,7 +192,8 @@ def delete_note(
 @router.get("/search", response_model=List[schemas.Note])
 def find_notes_by_semantic_search(
     q: str = Query(..., min_length=3, description="Поисковый запрос для семантического поиска"),
-    db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
 ):
     """Выполняет качественный семантический поиск по содержимому заметок."""
     if not q.strip(): return []

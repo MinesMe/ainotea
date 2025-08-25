@@ -8,7 +8,7 @@ from enum import Enum
 # Импортируем наш Enum из моделей, чтобы использовать его и здесь
 from .models import NoteType
 
-# --- НОВЫЙ ENUM ДЛЯ ИСТОЧНИКОВ ТЕКСТА ---
+# --- ENUM ДЛЯ ИСТОЧНИКОВ ТЕКСТА ---
 class AddTextSourceType(str, Enum):
     """Перечисление для всех доступных источников добавления текста в заметку."""
     TEXT = "text"
@@ -100,19 +100,35 @@ class Note(NoteBase):
     class Config:
         from_attributes = True
 
-# --- Схемы для AI-задач ---
+# --- Схемы для AI-задач (ИЗМЕНЕНИЯ ЗДЕСЬ) ---
 
 class AITaskType(str, Enum):
-    """
-    Перечисление для всех доступных типов AI-задач.
-    """
+    """Перечисление для всех доступных типов AI-задач."""
     SUMMARY = "summary"
     FLASHCARDS = "flashcards"
     QUIZ = "quiz"
+    TRANSLATE = "translate" # <-- ДОБАВЛЕНО
+
+class TargetLanguage(str, Enum):
+    """Перечисление доступных языков для перевода."""
+    GERMAN = "German"
+    CHINESE = "Chinese"
+    SPANISH = "Spanish"
+    PORTUGUESE = "Portuguese"
+    FRENCH = "French"
+    HINDI = "Hindi"
+    ENGLISH = "English"
+
+class AITaskRequest(BaseModel):
+    """Схема для запроса на генерацию AI-контента."""
+    note_id: int
+    task_type: AITaskType
+    # Необязательное поле, которое используется только если task_type = TRANSLATE
+    target_language: Optional[TargetLanguage] = None
 
 class AIGeneratedContentBase(BaseModel):
     """Базовая схема для сгенерированного контента."""
-    content_type: AITaskType
+    content_type: str # <-- Меняем на str, чтобы хранить "translate:German" и т.п.
     data: Any
 
 class AIGeneratedContentCreate(AIGeneratedContentBase):
