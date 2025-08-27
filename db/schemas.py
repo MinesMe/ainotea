@@ -18,7 +18,6 @@ class AddTextSourceType(str, Enum):
     DOCX = "docx"
     AUDIO = "audio"
     RECORD = "record"
-    TRANSLATE = "translate"
 
 # --- Вспомогательные схемы (без изменений) ---
 
@@ -115,13 +114,16 @@ class AITaskType(str, Enum):
 
 class TargetLanguage(str, Enum):
     """Перечисление доступных языков для перевода."""
+    ENGLISH = "English"
+    ARABIC = "Arabic"
+    FRENCH = "French"
     GERMAN = "German"
-    CHINESE = "Chinese"
+    ITALIAN = "Italian"
     SPANISH = "Spanish"
     PORTUGUESE = "Portuguese"
-    FRENCH = "French"
+    JAPANESE = "Japanese"
+    CHINESE = "Chinese"
     HINDI = "Hindi"
-    ENGLISH = "English"
 
 class AITaskRequest(BaseModel):
     """Схема для запроса на генерацию AI-контента."""
