@@ -17,14 +17,12 @@ router = APIRouter(prefix="/ai", tags=["AI Tasks"])
 async def generate_ai_content(
     note_id: int = Form(...),
     task_type: schemas.AITaskType = Form(...),
-    target_language: Optional[schemas.TargetLanguage] = Form(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Запускает генерацию AI-контента (summary, flashcards, quiz, translate)
+    Запускает генерацию AI-контента (summary, flashcards, quiz)
     и сохраняет результат в базу данных.
-    При выборе task_type = 'translate', необходимо указать 'target_language'.
     """
     # 1. Находим заметку в БД
     note = crud.get_note_by_id(db, note_id=note_id, user_id=current_user.id)
@@ -49,18 +47,11 @@ async def generate_ai_content(
         generated_data = await ai_processor.generate_flashcards(text_content)
     elif task_type == schemas.AITaskType.QUIZ:
         generated_data = await ai_processor.generate_quiz(text_content)
-    elif task_type == schemas.AITaskType.TRANSLATE:
-        # Проверяем, что язык указан
-        if not target_language:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Для задачи 'translate' необходимо указать 'target_language'."
-            )
-        generated_data = await ai_processor.translate_text(
-            text_content, target_language.value
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported task type: {task_type.value}"
         )
-        # Сохраняем тип контента вместе с языком для ясности
-        content_type_str = f"{task_type.value}:{target_language.value}"
 
     if not generated_data or isinstance(generated_data, str):
         raise HTTPException(

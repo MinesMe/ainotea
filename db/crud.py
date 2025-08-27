@@ -70,6 +70,21 @@ def append_text_block_to_note(db: Session, db_note: models.Note, text_block: sch
     db.refresh(db_note)
     return db_note
 
+def update_note_content(db: Session, note_id: int, user_id: int, content_update: schemas.NoteContentUpdate) -> Optional[models.Note]:
+    """Обновляет содержимое заметки."""
+    db_note = get_note_by_id(db, note_id=note_id, user_id=user_id)
+    if not db_note:
+        return None
+    
+    # Преобразуем содержимое в список словарей
+    db_note.content = [block.model_dump() for block in content_update.content]
+    
+    # Явно указываем SQLAlchemy, что JSON-поле было изменено
+    flag_modified(db_note, "content")
+    
+    db.commit()
+    db.refresh(db_note)
+    return db_note
 
 def add_note_to_folder(db: Session, note_id: int, folder_id: int, user_id: int) -> Optional[models.Note]:
     """Добавляет заметку в папку, проверяя, что и папка, и заметка принадлежат пользователю."""

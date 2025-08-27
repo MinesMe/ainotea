@@ -18,17 +18,18 @@ router = APIRouter(prefix="/notes", tags=["Notes"])
 
 # --- Внутренние функции-помощники ---
 
-def _extract_text_from_source(
+async def _extract_text_from_source(
     source_type: schemas.AddTextSourceType,
     data: Optional[str] = None,
     # 👇 ИСПРАВЛЕНИЕ: Возвращаем правильный тип UploadFile
-    file: Optional[UploadFile] = None
+    file: Optional[UploadFile] = None,
+    target_language: Optional[schemas.TargetLanguage] = None
 ) -> Tuple[str, Optional[str]]:
     """Извлекает текст из различных источников и возвращает текст и путь к файлу (если есть)."""
     extracted_text = ""
     file_path: Optional[str] = None
     
-    if source_type in [schemas.AddTextSourceType.TEXT, schemas.AddTextSourceType.LINK, schemas.AddTextSourceType.YOUTUBE]:
+    if source_type in [schemas.AddTextSourceType.TEXT, schemas.AddTextSourceType.LINK, schemas.AddTextSourceType.YOUTUBE, schemas.AddTextSourceType.TRANSLATE]:
         if not data:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Для этого типа источника необходимо поле 'data'.")
         if source_type == schemas.AddTextSourceType.TEXT:
@@ -37,6 +38,12 @@ def _extract_text_from_source(
             extracted_text = url_reader_helper.get_text_from_url(data)
         elif source_type == schemas.AddTextSourceType.YOUTUBE:
             extracted_text = content_processor.get_text_from_youtube(data)
+        elif source_type == schemas.AddTextSourceType.TRANSLATE:
+            if not target_language:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Для перевода необходимо указать target_language.")
+            extracted_text = await ai_processor.translate_text(data, target_language.value)
+            if not extracted_text or not extracted_text.strip():
+                raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Failed to translate text.")
 
     elif source_type in [schemas.AddTextSourceType.PDF, schemas.AddTextSourceType.DOCX, schemas.AddTextSourceType.AUDIO, schemas.AddTextSourceType.RECORD]:
         # Простая и надежная проверка
@@ -76,40 +83,48 @@ def _create_and_save_note(
 # --- ЭНДПОИНТЫ CRUD ---
 
 @router.post("/new/from_data", response_model=schemas.Note, status_code=status.HTTP_201_CREATED)
-def create_note_from_data(
-    source_type: models.NoteType = Form(...),
+async def create_note_from_data(
+    source_type: schemas.AddTextSourceType = Form(...),
     data: str = Form(...),
+    target_language: Optional[schemas.TargetLanguage] = Form(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    """Создает новую заметку из текста, обычной ссылки или YouTube URL."""
-    add_text_source_type = schemas.AddTextSourceType(source_type.value)
-    extracted_text, _ = _extract_text_from_source(source_type=add_text_source_type, data=data)
+    """Создает новую заметку из текста, обычной ссылки, YouTube URL или перевода."""
+    extracted_text, _ = await _extract_text_from_source(source_type=source_type, data=data, target_language=target_language)
+    
+    # Определяем тип заметки на основе источника
+    note_type = models.NoteType.TEXT
+    if source_type == schemas.AddTextSourceType.LINK:
+        note_type = models.NoteType.LINK
+    elif source_type == schemas.AddTextSourceType.YOUTUBE:
+        note_type = models.NoteType.YOUTUBE
     
     title_map = {
-        models.NoteType.TEXT: f"Текстовая заметка: {data[:30]}...",
-        models.NoteType.LINK: f"Заметка с веб-страницы: {data[:40]}...",
-        models.NoteType.YOUTUBE: f"Заметка из YouTube: {data[:40]}...",
+        schemas.AddTextSourceType.TEXT: f"Текстовая заметка: {data[:30]}...",
+        schemas.AddTextSourceType.LINK: f"Заметка с веб-страницы: {data[:40]}...",
+        schemas.AddTextSourceType.YOUTUBE: f"Заметка из YouTube: {data[:40]}...",
+        schemas.AddTextSourceType.TRANSLATE: f"Перевод на {target_language.value}: {data[:30]}...",
     }
     title = title_map.get(source_type)
-    source_uri = data if source_type != models.NoteType.TEXT else None
+    source_uri = data if source_type in [schemas.AddTextSourceType.LINK, schemas.AddTextSourceType.YOUTUBE] else None
 
     return _create_and_save_note(
-        db, current_user, title, source_type, 
+        db, current_user, title, note_type, 
         [schemas.TextBlock(text=extracted_text)], extracted_text, source_uri
     )
 
 @router.post("/new/from_file", response_model=schemas.Note, status_code=status.HTTP_201_CREATED)
-def create_note_from_file(
+async def create_note_from_file(
     source_type: models.NoteType = Form(...), 
-    # 👇 ИСПРАВЛЕНИЕ: Возвращаем строгий и правильный тип UploadFile
+    # ИСПРАВЛЕНИЕ: Возвращаем строгий и правильный тип UploadFile
     file: UploadFile = File(...),
     db: Session = Depends(get_db), 
     current_user: models.User = Depends(get_current_user)
 ):
     """Создает новую заметку из загруженного файла (PDF, DOCX, аудио)."""
     add_text_source_type = schemas.AddTextSourceType(source_type.value)
-    extracted_text, file_path = _extract_text_from_source(source_type=add_text_source_type, file=file)
+    extracted_text, file_path = await _extract_text_from_source(source_type=add_text_source_type, file=file)
     
     title = f"Заметка из файла: {file.filename}"
     source_uri = file_storage.get_file_url(file_path) if file_path else None
@@ -119,13 +134,15 @@ def create_note_from_file(
         [schemas.TextBlock(text=extracted_text)], extracted_text, source_uri
     )
 
+
 @router.post("/{note_id}/add-text", response_model=schemas.Note)
-def add_text_to_note(
+async def add_text_to_note(
     note_id: int,
     source_type: schemas.AddTextSourceType = Form(...),
     data: Optional[str] = Form(None),
     # 👇 ИСПРАВЛЕНИЕ: Указываем правильный тип для необязательного файла
     file: Optional[UploadFile] = File(None),
+    target_language: Optional[schemas.TargetLanguage] = Form(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -134,7 +151,7 @@ def add_text_to_note(
     if not db_note:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Заметка с ID {note_id} не найдена.")
 
-    extracted_text, _ = _extract_text_from_source(source_type=source_type, data=data, file=file)
+    extracted_text, _ = await _extract_text_from_source(source_type=source_type, data=data, file=file, target_language=target_language)
     new_text_block = schemas.TextBlock(
         header=f"Добавлено из '{source_type.value}'",
         text=extracted_text
@@ -172,6 +189,31 @@ def update_note(
     updated_note = crud.update_note(db, note_id=note_id, user_id=current_user.id, note_update=note_update)
     if not updated_note:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Заметка с ID {note_id} не найдена.")
+    return updated_note
+
+@router.put("/{note_id}/content", response_model=schemas.Note)
+def update_note_content(
+    note_id: int,
+    content_update: schemas.NoteContentUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Обновляет содержимое заметки."""
+    updated_note = crud.update_note_content(db, note_id=note_id, user_id=current_user.id, content_update=content_update)
+    if not updated_note:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Заметка с ID {note_id} не найдена.")
+    
+    # Обновляем векторное хранилище с новым содержимым
+    full_text_content = " ".join([block.get("text", "") for block in updated_note.content if isinstance(block, dict)])
+    if full_text_content.strip():
+        vector_store.delete_note(note_id=note_id)
+        vector_store.upsert_note_chunks(
+            note_id=note_id, user_id=current_user.id, text_content=full_text_content
+        )
+    else:
+        # Если содержимое пустое, просто удаляем из векторного хранилища
+        vector_store.delete_note(note_id=note_id)
+    
     return updated_note
 
 @router.delete("/{note_id}", status_code=status.HTTP_204_NO_CONTENT)

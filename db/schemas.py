@@ -18,6 +18,7 @@ class AddTextSourceType(str, Enum):
     DOCX = "docx"
     AUDIO = "audio"
     RECORD = "record"
+    TRANSLATE = "translate"
 
 # --- Вспомогательные схемы (без изменений) ---
 
@@ -90,6 +91,10 @@ class NoteUpdate(BaseModel):
     title: Optional[str] = None
     folder_id: Optional[int] = Field(None, nullable=True)
 
+class NoteContentUpdate(BaseModel):
+    """Схема для обновления содержимого заметки."""
+    content: List[Union[TextBlock, TranscriptBlock]]
+
 
 class Note(NoteBase):
     """Схема для отображения полной информации о заметке."""
@@ -107,7 +112,6 @@ class AITaskType(str, Enum):
     SUMMARY = "summary"
     FLASHCARDS = "flashcards"
     QUIZ = "quiz"
-    TRANSLATE = "translate" # <-- ДОБАВЛЕНО
 
 class TargetLanguage(str, Enum):
     """Перечисление доступных языков для перевода."""
