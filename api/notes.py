@@ -163,6 +163,56 @@ async def create_note_from_file(
     )
 
 
+# --- НОВЫЙ ЭНДПОИНТ ДЛЯ ПЕРЕВОДА СУЩЕСТВУЮЩЕЙ ЗАМЕТКИ ---
+@router.post("/{note_id}/translate", response_model=schemas.Note, status_code=status.HTTP_201_CREATED)
+async def translate_note(
+    note_id: int,
+    target_language: schemas.TargetLanguage = Form(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """
+    Создает новую заметку путем перевода существующей заметки на указанный язык.
+    """
+    # 1. Находим исходную заметку
+    db_note = crud.get_note_by_id(db, note_id=note_id, user_id=current_user.id)
+    if not db_note:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Заметка с ID {note_id} не найдена.")
+
+    # 2. Собираем весь текст из заметки
+    if not db_note.content:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Заметка пуста и не содержит текста для перевода.")
+    
+    full_text_to_translate = " ".join(
+        [block.get("text", "") for block in db_note.content if isinstance(block, dict) and block.get("text")]
+    )
+    
+    if not full_text_to_translate.strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Заметка не содержит текста для перевода.")
+
+    # 3. Выполняем перевод
+    translation_result = await ai_processor.translate_text(full_text_to_translate, target_language.value)
+    
+    if isinstance(translation_result, dict):
+        translated_text = translation_result.get("translated_text", "")
+    else:
+        translated_text = ""
+        
+    if not translated_text or not translated_text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Не удалось выполнить перевод текста."
+        )
+
+    # 4. Создаем новую заметку с переводом
+    new_title = f"Перевод '{db_note.title}' на {target_language.value}"
+    
+    return _create_and_save_note(
+        db, current_user, new_title, models.NoteType.TEXT,
+        [schemas.TextBlock(text=translated_text)], translated_text, None
+    )
+
+
 @router.post("/{note_id}/add-text", response_model=schemas.Note)
 async def add_text_to_note(
     note_id: int,
