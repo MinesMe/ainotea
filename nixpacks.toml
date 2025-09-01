@@ -1,0 +1,5 @@
+# Файл: nixpacks.toml
+
+[phases.setup]
+# Добавляем системные пакеты, необходимые для OpenCV и MoviePy (FFmpeg)
+nixPkgs = ["pkgs.opencv", "pkgs.ffmpeg"]
