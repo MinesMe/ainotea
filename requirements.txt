@@ -12,8 +12,13 @@ requests
 beautifulsoup4
 chromadb
 sentence-transformers
-openai
 youtube-transcript-api==1.1.1
 PyMuPDF
 python-docx
 ffmpeg-python  
+openai==1.35.0
+httpx==0.27.0
+moviepy==1.0.3
+opencv-python==4.9.0.80
+Pillow
+numpy==1.26.4

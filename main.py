@@ -1,8 +1,5 @@
 # file: main.py
 
-# --- ДИАГНОСТИЧЕСКИЙ ВЫВОД ---
-print("--- Starting main.py ---")
-
 import os
 from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect, Query, status, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -12,12 +9,11 @@ from sqlalchemy.orm import Session
 # Импортируем наши модули и роутеры
 from db.database import engine, get_db
 from db import models, crud
-from api import auth, folders, notes, video, ai_tasks
+# --- ИЗМЕНЕНИЕ 1: Убираем импорт `video` ---
+from api import auth, folders, notes, ai_tasks, tiktok_video, chat
 
-# --- НОВЫЕ ИМПОРТЫ ДЛЯ WEBSOCKET ---
 from api.connection_manager import manager
-from api.auth_dependency import get_current_user # Нам нужна эта функция для проверки токена
-# ------------------------------------
+from api.auth_dependency import get_current_user
 
 
 # --- Инициализация ---
@@ -36,9 +32,6 @@ app = FastAPI(
     description="Бэкэнд для умного приложения по ведению заметок с функциями OpenAI.",
     version="2.0.0",
     swagger_ui_parameters={"persistAuthorization": True},
-    
-    # --- ИСПРАВЛЕНИЕ ДЛЯ SWAGGER UI ---
-    # Явно указываем FastAPI использовать свежую версию Swagger UI из CDN
     swagger_ui_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.9.0/swagger-ui-bundle.js",
     swagger_ui_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.9.0/swagger-ui.css"
 )
@@ -71,60 +64,49 @@ print("--- Static routes mounted ---")
 app.include_router(auth.router)
 app.include_router(folders.router)
 app.include_router(notes.router)
-app.include_router(video.router)
+# --- ИЗМЕНЕНИЕ 2: Убираем подключение роутера `video` ---
+# app.include_router(video.router)
 app.include_router(ai_tasks.router)
+app.include_router(tiktok_video.router)
+app.include_router(chat.router)
 print("--- REST API routers included ---")
 
 
 # --- WebSocket Endpoint for Collaboration ---
-# Важное изменение: FastAPI не может использовать Depends() в веб-сокетах так же,
-# как в обычных эндпоинтах. Нужно немного изменить логику получения сессии БД.
 @app.websocket("/ws/{note_id}")
 async def websocket_endpoint(
     websocket: WebSocket,
     note_id: str,
     token: str = Query(...),
 ):
-    """
-    Эндпоинт для совместного редактирования заметки в реальном времени.
-    """
-    # Создаем сессию БД вручную для этого соединения
     db = next(get_db())
     user = None
     try:
-        # Шаг 1: Аутентификация пользователя по токену из query-параметра
         user = get_current_user(token=token, db=db)
     
         if not user:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
-        # Шаг 2: Проверка, что заметка существует и принадлежит пользователю
         note = crud.get_note_by_id(db, note_id=int(note_id), user_id=user.id)
         if not note:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
-        # Шаг 3: Подключение к "комнате" для этой заметки
         await manager.connect(websocket, note_id)
         print(f"WebSocket connection established for user {user.id} to note {note_id}")
         
         try:
-            # Шаг 4: Бесконечный цикл для приема и отправки сообщений
             while True:
                 data = await websocket.receive_text()
-                # Рассылаем полученные данные всем остальным участникам в "комнате"
                 await manager.broadcast(data, note_id, websocket)
         except WebSocketDisconnect:
-            # Шаг 5: Отключение при разрыве соединения
             manager.disconnect(websocket, note_id)
             print(f"WebSocket connection closed for user {user.id} from note {note_id}")
             
     except HTTPException:
-        # Если токен невалиден, get_current_user вызовет HTTPException
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
     finally:
-        # Убеждаемся, что сессия БД всегда закрывается
         db.close()
 
 

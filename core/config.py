@@ -1,31 +1,65 @@
 # file: core/config.py
 
+# Импортируем pathlib для работы с путями к файлам
+# Импортируем pydantic_settings для загрузки конфигурации
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
+
+# --- ШАГ 1: Определение абсолютного пути к файлу .env ---
+
+# Создаем объект Path для текущего файла (config.py)
+# .resolve() получает его полный, абсолютный путь в системе
+# .parent получает папку, в которой лежит файл (папка 'core')
+# .parent еще раз получает родительскую папку для 'core' (это и есть корень проекта)
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Соединяем путь к корню проекта с именем файла '.env'
+# Теперь у нас есть точный и полный путь к нашему файлу конфигурации
+ENV_FILE_PATH = BASE_DIR / ".env"
+
+
+# --- ШАГ 2: Определение класса с настройками ---
 
 class Settings(BaseSettings):
     """
-    Класс для управления настройками приложения.
-    Все поля сделаны необязательными для гарантированного запуска.
+    Этот класс отвечает за чтение и проверку переменных окружения.
+    Pydantic автоматически прочитает переменные из .env и проверит их типы.
     """
-    # --- СДЕЛАЕМ ВСЕ ПОЛЯ НЕОБЯЗАТЕЛЬНЫМИ ---
-    DATABASE_URL: Optional[str] = None
-    SECRET_KEY: Optional[str] = "default_secret_key_change_me" # Добавим значение по умолчанию
-    OPENAI_API_KEY: Optional[str] = None
-    # ------------------------------------
+    
+    # ОБЯЗАТЕЛЬНЫЕ ПЕРЕМЕННЫЕ
+    # Если какой-то из этих переменных не будет в .env, приложение выдаст ошибку при старте
+    OPENAI_API_KEY: str
+    DATABASE_URL: str
+    SECRET_KEY: str
 
+    # ПЕРЕМЕННЫЕ СО ЗНАЧЕНИЯМИ ПО УМОЛЧАНИЮ
+    # Эти значения будут использоваться, если их нет в .env
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30  # 30 дней
 
-    model_config = SettingsConfigDict(env_file=".env", extra='ignore')
+    # Указываем Pydantic, откуда именно загружать переменные
+    model_config = SettingsConfigDict(
+        env_file=ENV_FILE_PATH,  # Используем наш вычисленный абсолютный путь
+        extra='ignore'           # Игнорировать лишние переменные в .env
+    )
 
-# Создаем один глобальный экземпляр настроек.
+
+# --- ШАГ 3: Создание единого объекта настроек ---
+
+# Создаем один экземпляр класса Settings, который будет использоваться
+# во всем приложении. Это стандартная практика (паттерн Singleton).
 settings = Settings()
 
-# --- ДИАГНОСТИЧЕСКИЙ ВЫВОД ---
-# Этот код выполнится при старте и покажет, какие настройки были загружены.
-print("--- Configuration Loaded ---")
-print(f"DATABASE_URL is set: {settings.DATABASE_URL is not None}")
-print(f"SECRET_KEY is set: {settings.SECRET_KEY is not None}")
-print(f"OPENAI_API_KEY is set: {settings.OPENAI_API_KEY is not None}")
-print("--------------------------")
+
+# --- (Опционально) Диагностический вывод при старте ---
+# Этот блок помогает убедиться, что все загрузилось правильно
+
+# Проверяем, действительно ли Python видит файл по вычисленному пути
+if not ENV_FILE_PATH.is_file():
+    print(f"!!! ВНИМАНИЕ: Файл .env не найден по пути: {ENV_FILE_PATH}")
+    print("!!! Убедитесь, что файл .env находится в корневой папке проекта.")
+else:
+    print("--- Конфигурация успешно загружена ---")
+    print(f"Загрузка настроек из файла: {ENV_FILE_PATH}")
+    print(f"Ключ OpenAI API загружен: {settings.OPENAI_API_KEY is not None}")
+    print("---------------------------------------")

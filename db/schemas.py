@@ -134,7 +134,7 @@ class AITaskRequest(BaseModel):
 
 class AIGeneratedContentBase(BaseModel):
     """Базовая схема для сгенерированного контента."""
-    content_type: str # <-- Меняем на str, чтобы хранить "translate:German" и т.п.
+    content_type: str
     data: Any
 
 class AIGeneratedContentCreate(AIGeneratedContentBase):
@@ -171,3 +171,15 @@ class VoiceSample(BaseModel):
 class VideoResponse(BaseModel):
     """Схема для ответа с URL на сгенерированное видео."""
     video_url: str
+
+# --- 👇👇👇 ДОБАВЬТЕ ЭТОТ КОД В КОНЕЦ ФАЙЛА 👇👇👇 ---
+
+# --- Схемы для Чата с GPT ---
+
+class ChatRequest(BaseModel):
+    """Схема для запроса в чат."""
+    text: str = Field(..., description="Текст, который пользователь отправляет в чат.", min_length=1)
+
+class ChatResponse(BaseModel):
+    """Схема для ответа от чата."""
+    reply: str

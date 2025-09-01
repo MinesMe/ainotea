@@ -1,16 +1,25 @@
+# file: services/url_reader_helper.py
+
 import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
 from core.config import settings
 import sys
+# --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
+import httpx
 
 # --- Инициализация OpenAI клиента прямо в этом файле ---
 try:
-    # Мы используем синхронный клиент, так как наша функция синхронная
-    sync_client = OpenAI(api_key=settings.OPENAI_API_KEY)
+    # Применяем тот же самый метод для синхронного клиента
+    custom_sync_http_client = httpx.Client()
+    sync_client = OpenAI(
+        api_key=settings.OPENAI_API_KEY,
+        http_client=custom_sync_http_client
+    )
     print("OpenAI client initialized successfully for url_reader_helper.")
 except Exception as e:
     sync_client = None
+    # Ошибка теперь будет более информативной
     print(f"CRITICAL: Could not initialize OpenAI client for url_reader_helper. Error: {e}")
 
 
@@ -82,13 +91,10 @@ def _extract_main_content_with_gpt(text: str) -> str:
 def get_text_from_url(url: str) -> str | None:
     """
     Основная функция, которую вызывает api/notes.py.
-    Загружает веб-страницу, извлекает весь текст, а затем
-    использует GPT для очистки и получения только основного контента.
     """
     print(f"--- Шаг 1: Получаю 'сырые' данные со страницы: {url} ---")
     
     try:
-        # --- Часть 1: Скрейпинг с помощью BeautifulSoup ---
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
@@ -109,7 +115,6 @@ def get_text_from_url(url: str) -> str | None:
         
         print("--- 'Сырой' текст успешно извлечен. ---")
         
-        # --- Часть 2: Отправляем "сырой" текст в GPT для очистки ---
         print("--- Шаг 2: Отправляю текст в GPT для извлечения основного контента. ---")
         main_content = _extract_main_content_with_gpt(clean_raw_text)
         
@@ -121,7 +126,7 @@ def get_text_from_url(url: str) -> str | None:
     except Exception as e:
         print(f"Произошла непредвиденная ошибка: {e}")
         return None
-# --- Тестовый блок для запуска с флагом -m ---
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("\nОшибка: Пожалуйста, укажите URL в качестве аргумента.")
