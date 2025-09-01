@@ -18,7 +18,7 @@ class VectorStore:
         self.collection = self.client.get_or_create_collection(
             name=COLLECTION_NAME,
             # Косинусное расстояние отлично подходит для измерения семантической схожести текстов
-            metadata={"hnsw:space": "cosine"} 
+            metadata={"hnsw:space": "cosine"}
         )
         print("VectorStore initialized with ChromaDB.")
 
@@ -38,7 +38,7 @@ class VectorStore:
         chunks = []
         for p in paragraphs:
             # Игнорируем слишком короткие или пустые параграфы
-            if len(p.strip()) > 50: 
+            if len(p.strip()) > 50:
                 chunks.append(p.strip())
         return chunks
 
@@ -74,9 +74,11 @@ class VectorStore:
         )
         print(f"Upserted {len(chunks)} chunks for note {note_id} to vector store.")
 
-    def search_notes(self, user_id: int, query_text: str, top_n: int = 5, threshold: float = 0.5) -> List[Dict[str, Any]]:
+    # --- 👇👇👇 ИЗМЕНЕНИЕ ЗДЕСЬ 👇👇👇 ---
+    def search_notes(self, user_id: int, query_text: str, top_n: int = 3, threshold: float = 0.5) -> List[Dict[str, Any]]:
         """
         Улучшенная и надежная функция поиска. Находит релевантные чанки.
+        Теперь по умолчанию возвращает top_n = 3.
         """
         if not query_text:
             return []
@@ -97,11 +99,8 @@ class VectorStore:
                 if distance < threshold:
                     metadata = results['metadatas'][0][i]
                     
-                    # --- ИСПРАВЛЕНИЕ ЗДЕСЬ: Безопасное получение note_id ---
-                    # Используем .get(), чтобы избежать ошибки KeyError, если ключ отсутствует в старых данных
                     note_id = metadata.get('note_id')
                     
-                    # Если в метаданных по какой-то причине нет note_id, просто пропускаем этот результат
                     if not note_id:
                         continue
                         
